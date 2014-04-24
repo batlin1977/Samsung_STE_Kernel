@@ -33,6 +33,7 @@
 #include <linux/kernel_stat.h>
 #include <asm/cputime.h>
 #include <linux/input.h>
+#include <linux/earlysuspend.h>
 
 static int active_count;
 
@@ -137,6 +138,10 @@ static int two_phase_freq_array[NR_CPUS] = {[0 ... NR_CPUS-1] = 998400};
 
 static int cpufreq_governor_intelliactive(struct cpufreq_policy *policy,
 		unsigned int event);
+
+static struct early_suspend cpufreq_gov_early_suspend;
+static unsigned int cpufreq_gov_lcd_status_intelliactive;
+static unsigned long stored_timer_rate;
 
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTELLIACTIVE
 static
@@ -675,6 +680,12 @@ static int cpufreq_interactive_speedchange_task(void *data)
 
 				if (pjcpu->target_freq > max_freq)
 					max_freq = pjcpu->target_freq;
+			}
+
+			if (num_online_cpus() == 1 && cpufreq_gov_lcd_status_intelliactive == 1) {
+				cpu_up(1);
+			} else if (num_online_cpus() == 2 && cpufreq_gov_lcd_status_intelliactive == 0) {
+				cpu_down(1);
 			}
 
 			if (max_freq != pcpu->policy->cur)
@@ -1487,6 +1498,19 @@ static int cpufreq_governor_intelliactive(struct cpufreq_policy *policy,
 	return 0;
 }
 
+static void cpufreq_gov_suspend(struct early_suspend *h)
+{
+	cpufreq_gov_lcd_status_intelliactive = 0;
+	stored_timer_rate = timer_rate;
+	timer_rate = DEFAULT_TIMER_RATE * 10;
+}
+
+static void cpufreq_gov_resume(struct early_suspend *h)
+{
+	cpufreq_gov_lcd_status_intelliactive = 1;
+	timer_rate = stored_timer_rate;
+}
+
 static void cpufreq_interactive_nop_timer(unsigned long data)
 {
 }
@@ -1521,6 +1545,14 @@ static int __init cpufreq_intelliactive_init(void)
 
 	sched_setscheduler_nocheck(speedchange_task, SCHED_FIFO, &param);
 	get_task_struct(speedchange_task);
+
+    cpufreq_gov_lcd_status_intelliactive = 1;
+
+	cpufreq_gov_early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 25;
+
+	cpufreq_gov_early_suspend.suspend = cpufreq_gov_suspend;
+	cpufreq_gov_early_suspend.resume = cpufreq_gov_resume;
+	register_early_suspend(&cpufreq_gov_early_suspend);
 
 	/* NB: wake up so the thread does not look hung to the freezer */
 	wake_up_process(speedchange_task);
