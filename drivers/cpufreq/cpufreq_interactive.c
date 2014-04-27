@@ -121,7 +121,7 @@ static u64 boostpulse_endtime;
  * The CPU will be boosted to this frequency when the screen is
  * touched. input_boost needs to be enabled.
  */
-#define DEFAULT_INPUT_BOOST_FREQ 798720
+#define DEFAULT_INPUT_BOOST_FREQ 800000
 static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 
 /*
@@ -140,8 +140,8 @@ static bool io_is_busy = true;
  * sync_freq
  */
 static unsigned int up_threshold_any_cpu_load = 80;
-static unsigned int sync_freq = 399360;
-static unsigned int up_threshold_any_cpu_freq = 798720;
+static unsigned int sync_freq = 400000;
+static unsigned int up_threshold_any_cpu_freq = 800000;
 
 static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		unsigned int event);
