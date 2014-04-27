@@ -56,7 +56,6 @@
 #ifdef TOUCH_S2W
 #include <linux/ab8500-ponkey.h>
 #endif
-#include <linux/syscalls.h>
 #include <linux/input/bt404_ts.h>
 #include "zinitix_touch_bt4x3_firmware.h"
 
@@ -482,7 +481,6 @@ static int bt404_ts_resume_device(struct bt404_ts_data *data);
 static bool bt404_ts_init_device(struct bt404_ts_data *data, bool force_update);
 static void bt404_ts_report_touch_data(struct bt404_ts_data *data,
 							bool force_clear);
-
 /* define i2c sub functions*/
 static s32 bt404_ts_read_data(struct i2c_client *client, u16 reg, u8 *val,
 								u16 len)
@@ -1679,30 +1677,6 @@ static void bt404_ts_report_touch_data(struct bt404_ts_data *data,
 	input_sync(data->input_dev_ts);
 }
 
-#define BOOSTPULSE "/sys/devices/system/cpu/cpufreq/interactive/boostpulse"
-
-struct boost_codina {
-	int boostpulse_fd;
-};
-
-static struct boost_codina boost;
-
-static int boostpulse_open(void)
-{
-	if (boost.boostpulse_fd < 0)
-	{
-		boost.boostpulse_fd = sys_open(BOOSTPULSE, O_WRONLY, 0);
-
-		if (boost.boostpulse_fd < 0)
-		{
-			pr_info("Error opening %s\n", BOOSTPULSE);
-			return -1;		
-		}
-	}
-
-	return boost.boostpulse_fd;
-}
-
 static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 {
 	struct bt404_ts_data *data = dev_id;
@@ -1716,7 +1690,6 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 #endif
 	u16 addr, val;
 	u16 status;
-	int len;
 
 	if (gpio_get_value(data->pdata->gpio_int)) {
 		dev_err(&client->dev, "invalid interrupt\n");
@@ -1819,16 +1792,6 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 			if (ret < 0)
 				dev_err(&client->dev, "%s: err: cmd (clr int)\n",
 									__func__);
-		}
-
-		if (boostpulse_open() >= 0)
-		{
-			len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
-
-			if (len < 0)
-			{
-				pr_info("Error writing to %s\n", BOOSTPULSE);			
-			}
 		}
 
 #ifdef TSP_VERBOSE_DEBUG
@@ -4000,8 +3963,6 @@ static int bt404_ts_probe(struct i2c_client *client,
 	struct device *fac_dev_ts_temp;
 
 	extern unsigned int lcd_type;
-
-	boost.boostpulse_fd = -1;
 
 	if (!lcd_type) {
 		dev_err(&client->dev, "touch screen is not connected.(%d)\n",
