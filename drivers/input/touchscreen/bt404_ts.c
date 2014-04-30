@@ -1717,6 +1717,16 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 	u16 status;
 	int len;
 
+	if (boostpulse_open() >= 0)
+	{
+		len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
+
+		if (len < 0)
+		{
+			pr_info("Error writing to %s\n", BOOSTPULSE);
+		}
+	}
+
 	if (gpio_get_value(data->pdata->gpio_int)) {
 		dev_err(&client->dev, "invalid interrupt\n");
 		return IRQ_HANDLED;
@@ -1851,16 +1861,6 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 								__func__);
 			goto out_esd_start;
 		}
-
-	if (boostpulse_open() >= 0)
-	{
-		len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
-
-		if (len < 0)
-		{
-			pr_info("Error writing to %s\n", BOOSTPULSE);			
-		}
-	}
 
 		ret = bt404_ts_write_cmd(client, BT404_CLEAR_INT_STATUS_CMD);
 		if (ret < 0)
