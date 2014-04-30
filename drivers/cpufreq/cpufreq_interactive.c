@@ -67,7 +67,6 @@ static spinlock_t speedchange_cpumask_lock;
 static struct mutex gov_lock;
 
 /* Hi speed to bump to from lo speed when load burst (default max) */
-#define DEFAULT_HISPEED_FREQ
 static unsigned int hispeed_freq;
 
 /* Go to hi speed when CPU load at or above this value. */
@@ -87,7 +86,7 @@ static int ntarget_loads = ARRAY_SIZE(default_target_loads);
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down.
  */
-#define DEFAULT_MIN_SAMPLE_TIME (80 * USEC_PER_MSEC)
+#define DEFAULT_MIN_SAMPLE_TIME (90 * USEC_PER_MSEC)
 static unsigned long min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 
 /*
@@ -121,7 +120,7 @@ static u64 boostpulse_endtime;
  * The CPU will be boosted to this frequency when the screen is
  * touched. input_boost needs to be enabled.
  */
-#define DEFAULT_INPUT_BOOST_FREQ 400000
+#define DEFAULT_INPUT_BOOST_FREQ 600000
 static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 
 /*
@@ -131,7 +130,7 @@ static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 #define DEFAULT_TIMER_SLACK (4 * DEFAULT_TIMER_RATE)
 static int timer_slack_val = DEFAULT_TIMER_SLACK;
 
-static bool io_is_busy;
+static bool io_is_busy = 1;
 
 /*
  * If the max load among other CPUs is higher than up_threshold_any_cpu_load
@@ -139,7 +138,7 @@ static bool io_is_busy;
  * up_threshold_any_cpu_freq then do not let the frequency to drop below
  * sync_freq
  */
-static unsigned int up_threshold_any_cpu_load = 70;
+static unsigned int up_threshold_any_cpu_load = 60;
 static unsigned int sync_freq = 400000;
 static unsigned int up_threshold_any_cpu_freq = 800000;
 
