@@ -67,8 +67,8 @@ static spinlock_t speedchange_cpumask_lock;
 static struct mutex gov_lock;
 
 /* Hi speed to bump to from lo speed when load burst (default max) */
-#define DEFAULT_HISPEED_FREQ 800000
-static unsigned int hispeed_freq = DEFAULT_HISPEED_FREQ;
+#define DEFAULT_HISPEED_FREQ
+static unsigned int hispeed_freq;
 
 /* Go to hi speed when CPU load at or above this value. */
 #define DEFAULT_GO_HISPEED_LOAD 99
@@ -139,7 +139,7 @@ static bool io_is_busy;
  * up_threshold_any_cpu_freq then do not let the frequency to drop below
  * sync_freq
  */
-static unsigned int up_threshold_any_cpu_load = 60;
+static unsigned int up_threshold_any_cpu_load = 70;
 static unsigned int sync_freq = 400000;
 static unsigned int up_threshold_any_cpu_freq = 800000;
 
