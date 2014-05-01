@@ -418,6 +418,7 @@ static int x_threshold = ABS_THRESHOLD_X;
 static int y_threshold = ABS_THRESHOLD_Y;
 
 static int s2w_timeout = 1; /* Timeout in minutes */
+static int s2w_duration;
 
 static bool is_suspend = false;
 static bool waking_up = false;
@@ -4678,10 +4679,10 @@ static void bt404_ts_early_suspend(struct early_suspend *h)
 	is_suspend = 1;
 	#if CONFIG_HAS_WAKELOCK
 	if (sweep2wake) {
+		wake_lock(&s2w_wakelock);
 		if (timeout_enable) {
-			wake_lock_timeout(&s2w_wakelock, s2w_timeout * 60 * HZ);
-		} else {
-			wake_lock(&s2w_wakelock);
+			s2w_duration = s2w_timeout * 60 * HZ;
+			wake_lock_timeout(&s2w_wakelock, s2w_duration);
 		}
 	}
 	#endif
