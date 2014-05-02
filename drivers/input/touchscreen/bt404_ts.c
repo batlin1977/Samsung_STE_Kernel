@@ -56,8 +56,9 @@
 #ifdef TOUCH_S2W
 #include <linux/ab8500-ponkey.h>
 #endif
-#include <linux/syscalls.h>
 #include <linux/input/bt404_ts.h>
+#include <linux/syscalls.h>
+#include <linux/jiffies.h>
 #include "zinitix_touch_bt4x3_firmware.h"
 
 #define	TS_DRIVER_VERSION			"3.0.16"
@@ -416,10 +417,14 @@ static int y_press, y_release;
 static int x_threshold = ABS_THRESHOLD_X;
 static int y_threshold = ABS_THRESHOLD_Y;
 
+static int s2w_timeout = 1; /* Timeout in minutes */
+static int s2w_duration;
+
 static bool is_suspend = false;
 static bool waking_up = false;
 
 static bool sweep2wake = false;
+static bool timeout_enable = false;
 
 static void bt404_ponkey_thread(struct work_struct *bt404_ponkey_work)
 {
@@ -482,7 +487,6 @@ static int bt404_ts_resume_device(struct bt404_ts_data *data);
 static bool bt404_ts_init_device(struct bt404_ts_data *data, bool force_update);
 static void bt404_ts_report_touch_data(struct bt404_ts_data *data,
 							bool force_clear);
-
 /* define i2c sub functions*/
 static s32 bt404_ts_read_data(struct i2c_client *client, u16 reg, u8 *val,
 								u16 len)
@@ -1718,6 +1722,16 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 	u16 status;
 	int len;
 
+	if (boostpulse_open() >= 0)
+	{
+		len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
+
+		if (len < 0)
+		{
+			pr_info("Error writing to %s\n", BOOSTPULSE);
+		}
+	}
+
 	if (gpio_get_value(data->pdata->gpio_int)) {
 		dev_err(&client->dev, "invalid interrupt\n");
 		return IRQ_HANDLED;
@@ -1821,16 +1835,6 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 									__func__);
 		}
 
-		if (boostpulse_open() >= 0)
-		{
-			len = sys_write(boost.boostpulse_fd, "1", sizeof(BOOSTPULSE));
-
-			if (len < 0)
-			{
-				pr_info("Error writing to %s\n", BOOSTPULSE);			
-			}
-		}
-
 #ifdef TSP_VERBOSE_DEBUG
 		for (i = 0; i < data->cap_info.max_finger; i++) {
 			u8 sub_status = data->touch_info.coord[i].sub_status;
@@ -1862,6 +1866,7 @@ static irqreturn_t bt404_ts_interrupt(int irq, void *dev_id)
 								__func__);
 			goto out_esd_start;
 		}
+
 		ret = bt404_ts_write_cmd(client, BT404_CLEAR_INT_STATUS_CMD);
 		if (ret < 0)
 			dev_err(&client->dev, "%s: err: cmd (clr int)\n",
@@ -3887,8 +3892,10 @@ static struct attribute_group touchscreen_temp_attr_group = {
 static ssize_t bt404_sweep2wake_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	sprintf(buf, "status: %s\n", sweep2wake ? "on" : "off");
+	sprintf(buf, "%stimeout status: %s\n", buf, timeout_enable ? "on" : "off");
 	sprintf(buf, "%sthreshold_x: %d\n", buf, x_threshold);
 	sprintf(buf, "%sthreshold_y: %d\n", buf, y_threshold);
+	sprintf(buf, "%stimeout time: %d minute(s)\n", buf, s2w_timeout);
 	#if CONFIG_HAS_WAKELOCK
 	sprintf(buf, "%swakelock_ena: %d\n", buf, wake_lock_active(&s2w_wakelock));
 	#endif
@@ -3900,6 +3907,7 @@ static ssize_t bt404_sweep2wake_store(struct kobject *kobj, struct kobj_attribut
 {
 	int ret;
 	int threshold_tmp;
+	int timeout_tmp;
 
 	if (!strncmp(buf, "on", 2)) {
 		sweep2wake = true;
@@ -3921,6 +3929,34 @@ static ssize_t bt404_sweep2wake_store(struct kobject *kobj, struct kobj_attribut
 		#endif
 
 		pr_err("[TSP] Sweep2Wake Off\n");
+
+		return count;
+	}
+
+	if (!strncmp(buf, "timeout_enable=on", 17)) {
+		timeout_enable = true;
+
+		pr_err("[TSP] Sweep2Wake Timeout On\n");
+
+		return count;
+	}
+
+	if (!strncmp(buf, "timeout_enable=off", 18)) {
+		timeout_enable = false;
+
+		pr_err("[TSP] Sweep2Wake Timeout Off\n");
+
+		return count;
+	}
+
+	if (!strncmp(&buf[0], "timeout=", 8)) {
+		ret = sscanf(&buf[8], "%d", &timeout_tmp);
+		if ((!ret) || (timeout_tmp < 1)) {
+			pr_err("[TSP] invalid input\n");
+			return -EINVAL;
+		}
+
+		s2w_timeout = timeout_tmp;
 
 		return count;
 	}
@@ -4641,6 +4677,15 @@ static void bt404_ts_early_suspend(struct early_suspend *h)
 			container_of(h, struct bt404_ts_data, early_suspend);
 #ifdef TOUCH_S2W
 	is_suspend = 1;
+	#if CONFIG_HAS_WAKELOCK
+	if (sweep2wake) {
+		wake_lock(&s2w_wakelock);
+		if (timeout_enable) {
+			s2w_duration = s2w_timeout * 60 * HZ;
+			wake_lock_timeout(&s2w_wakelock, s2w_duration);
+		}
+	}
+	#endif
 #endif
 	bt404_ts_suspend(&data->client->dev);
 }

@@ -31,7 +31,6 @@
 #include <linux/slab.h>
 #include <linux/kernel_stat.h>
 #include <asm/cputime.h>
-#include <linux/earlysuspend.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
@@ -75,7 +74,7 @@ static unsigned int hispeed_freq;
 static unsigned long go_hispeed_load = DEFAULT_GO_HISPEED_LOAD;
 
 /* Sampling down factor to be applied to min_sample_time at max freq */
-static unsigned int sampling_down_factor = 120000;
+static unsigned int sampling_down_factor;
 
 /* Target load.  Lower values result in higher CPU speeds. */
 #define DEFAULT_TARGET_LOAD 90
@@ -87,7 +86,7 @@ static int ntarget_loads = ARRAY_SIZE(default_target_loads);
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down.
  */
-#define DEFAULT_MIN_SAMPLE_TIME (80 * USEC_PER_MSEC)
+#define DEFAULT_MIN_SAMPLE_TIME (90 * USEC_PER_MSEC)
 static unsigned long min_sample_time = DEFAULT_MIN_SAMPLE_TIME;
 
 /*
@@ -110,8 +109,8 @@ static spinlock_t above_hispeed_delay_lock;
 static unsigned int *above_hispeed_delay = default_above_hispeed_delay;
 static int nabove_hispeed_delay = ARRAY_SIZE(default_above_hispeed_delay);
 
-/* 250ms - 0.25s */
-#define DEFAULT_BOOSTPULSE_DURATION 250000
+/* 500ms - 0.5s */
+#define DEFAULT_BOOSTPULSE_DURATION 500000
 /* Duration of a boot pulse in usecs */
 static int boostpulse_duration_val = DEFAULT_BOOSTPULSE_DURATION;
 /* End time of boost pulse in ktime converted to usecs */
@@ -121,7 +120,7 @@ static u64 boostpulse_endtime;
  * The CPU will be boosted to this frequency when the screen is
  * touched. input_boost needs to be enabled.
  */
-#define DEFAULT_INPUT_BOOST_FREQ 800000
+#define DEFAULT_INPUT_BOOST_FREQ 600000
 static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 
 /*
@@ -131,24 +130,20 @@ static int input_boost_freq = DEFAULT_INPUT_BOOST_FREQ;
 #define DEFAULT_TIMER_SLACK (4 * DEFAULT_TIMER_RATE)
 static int timer_slack_val = DEFAULT_TIMER_SLACK;
 
-static bool io_is_busy = true;
+static bool io_is_busy = 1;
 
 /*
  * If the max load among other CPUs is higher than up_threshold_any_cpu_load
- * and if the highest frequency among the other CPUs is higher than
+ * or if the highest frequency among the other CPUs is higher than
  * up_threshold_any_cpu_freq then do not let the frequency to drop below
  * sync_freq
  */
-static unsigned int up_threshold_any_cpu_load = 80;
+static unsigned int up_threshold_any_cpu_load = 60;
 static unsigned int sync_freq = 400000;
 static unsigned int up_threshold_any_cpu_freq = 800000;
 
 static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 		unsigned int event);
-
-static struct early_suspend cpufreq_gov_early_suspend;
-static bool cpufreq_gov_lcd_status_interactive;
-static unsigned long stored_timer_rate;
 
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 static
@@ -460,7 +455,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 				max_freq = max(max_freq, picpu->target_freq);
 			}
 
-			if (max_freq > up_threshold_any_cpu_freq &&
+			if (max_freq > up_threshold_any_cpu_freq ||
 				max_load >= up_threshold_any_cpu_load)
 				new_freq = sync_freq;
 		}
@@ -666,12 +661,6 @@ static int cpufreq_interactive_speedchange_task(void *data)
 					max_freq = pjcpu->target_freq;
 			}
 
-			if (num_online_cpus() == 1 && cpufreq_gov_lcd_status_interactive) {
-				cpu_up(1);
-			} else if (num_online_cpus() == 2 && !cpufreq_gov_lcd_status_interactive) {
-				cpu_down(1);
-			}
-
 			if (max_freq != pcpu->policy->cur)
 				__cpufreq_driver_target(pcpu->policy,
 							max_freq,
@@ -701,6 +690,7 @@ static void cpufreq_interactive_boost(void)
 		spin_lock_irqsave(&pcpu->target_freq_lock, flags[1]);
 		if (pcpu->target_freq < input_boost_freq) {
 			pcpu->target_freq = input_boost_freq;
+
 			cpumask_set_cpu(i, &speedchange_cpumask);
 			pcpu->hispeed_validate_time =
 				ktime_to_us(ktime_get());
@@ -1248,9 +1238,6 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 
 	switch (event) {
 	case CPUFREQ_GOV_START:
-		if (!cpu_online(policy->cpu))
-			return -EINVAL;
-
 		mutex_lock(&gov_lock);
 
 		freq_table =
@@ -1303,6 +1290,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			pcpu = &per_cpu(cpuinfo, j);
 			down_write(&pcpu->enable_sem);
 			pcpu->governor_enabled = 0;
+			pcpu->target_freq = 0;
 			del_timer_sync(&pcpu->cpu_timer);
 			del_timer_sync(&pcpu->cpu_slack_timer);
 			up_write(&pcpu->enable_sem);
@@ -1369,19 +1357,6 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 	return 0;
 }
 
-static void cpufreq_gov_suspend(struct early_suspend *h)
-{
-	cpufreq_gov_lcd_status_interactive = false;
-	stored_timer_rate = timer_rate;
-	timer_rate = DEFAULT_TIMER_RATE * 10;
-}
-
-static void cpufreq_gov_resume(struct early_suspend *h)
-{
-	cpufreq_gov_lcd_status_interactive = true;
-	timer_rate = stored_timer_rate;
-}
-
 static void cpufreq_interactive_nop_timer(unsigned long data)
 {
 }
@@ -1417,14 +1392,6 @@ static int __init cpufreq_interactive_init(void)
 
 	sched_setscheduler_nocheck(speedchange_task, SCHED_FIFO, &param);
 	get_task_struct(speedchange_task);
-
-	cpufreq_gov_lcd_status_interactive = true;
-
-	cpufreq_gov_early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 25;
-
-	cpufreq_gov_early_suspend.suspend = cpufreq_gov_suspend;
-	cpufreq_gov_early_suspend.resume = cpufreq_gov_resume;
-	register_early_suspend(&cpufreq_gov_early_suspend);
 
 	/* NB: wake up so the thread does not look hung to the freezer */
 	wake_up_process(speedchange_task);
